@@ -1,88 +1,111 @@
+class BinaryIndexedTree {
+    n: number;
+    tree: number[];
+
+    constructor(n: number) {
+        this.n = n;
+        this.tree = Array(n + 1).fill(0);
+    }
+
+    update(i: number, delta: number): void {
+        for (i++; i <= this.n; i += i & -i) {
+            this.tree[i] ^= delta;
+        }
+    }
+
+    query(i: number): number {
+        let res = 0;
+        for (; i > 0; i -= i & -i) {
+            res ^= this.tree[i];
+        }
+        return res;
+    }
+}
+
 function palindromePath(n: number, edges: number[][], s: string, queries: string[]): boolean[] {
-    const adj: number[][] = Array.from({length: n}, () => []);
+    const g: number[][] = Array.from({ length: n }, () => []);
     for (const [u, v] of edges) {
-        adj[u].push(v);
-        adj[v].push(u);
+        g[u].push(v);
+        g[v].push(u);
     }
 
-    let LOG = 1;
-    while ((1 << LOG) < n) LOG++;
-
-    const tin = new Int32Array(n);
-    const tout = new Int32Array(n);
-    const dep = new Int32Array(n);
-    const pfx = new Int32Array(n);
-    const up: Int32Array[] = Array.from({length: LOG}, () => new Int32Array(n));
-    const sc = s.split('');
-
-    // Iterative DFS for Euler tour, depths, prefix XOR, parents
+    const parent = Array(n).fill(0);
+    const depth = Array(n).fill(0);
+    const tin = Array(n).fill(0);
+    const tout = Array(n).fill(0);
     let timer = 0;
-    const stk: [number, number, boolean][] = [[0, -1, false]];
-    while (stk.length > 0) {
-        const [v, p, done] = stk.pop()!;
-        if (done) { tout[v] = timer - 1; continue; }
-        tin[v] = timer++;
-        up[0][v] = p < 0 ? v : p;
-        dep[v] = p < 0 ? 0 : dep[p] + 1;
-        pfx[v] = (p < 0 ? 0 : pfx[p]) ^ (1 << (sc[v].charCodeAt(0) - 97));
-        stk.push([v, p, true]);
-        for (const u of adj[v]) {
-            if (u !== p) stk.push([u, v, false]);
+
+    function dfs(u: number, p: number): void {
+        parent[u] = p === -1 ? 0 : p;
+        tin[u] = timer++;
+        for (const v of g[u]) {
+            if (v !== p) {
+                depth[v] = depth[u] + 1;
+                dfs(v, u);
+            }
+        }
+        tout[u] = timer;
+    }
+    dfs(0, -1);
+
+    const m = 32 - Math.clz32(n);
+    const up: number[][] = Array.from({ length: m }, () => Array(n).fill(0));
+    up[0] = [...parent];
+    for (let j = 1; j < m; j++) {
+        for (let i = 0; i < n; i++) {
+            up[j][i] = up[j - 1][up[j - 1][i]];
         }
     }
 
-    // Binary lifting table for LCA
-    for (let k = 1; k < LOG; k++) {
-        for (let v = 0; v < n; v++) {
-            up[k][v] = up[k - 1][up[k - 1][v]];
-        }
+    const bit = Array(n).fill(0);
+    for (let i = 0; i < n; i++) {
+        bit[i] = 1 << (s.charCodeAt(i) - 97);
+    }
+
+    const tree = new BinaryIndexedTree(n);
+    for (let i = 0; i < n; i++) {
+        tree.update(tin[i], bit[i]);
+        tree.update(tout[i], bit[i]);
     }
 
     function lca(u: number, v: number): number {
-        if (dep[u] < dep[v]) { const t = u; u = v; v = t; }
-        let d = dep[u] - dep[v];
-        for (let k = 0; k < LOG; k++) {
-            if ((d >> k) & 1) u = up[k][u];
+        if (depth[u] < depth[v]) {
+            [u, v] = [v, u];
         }
-        if (u === v) return u;
-        for (let k = LOG - 1; k >= 0; k--) {
-            if (up[k][u] !== up[k][v]) { u = up[k][u]; v = up[k][v]; }
+        let d = depth[u] - depth[v];
+        for (let j = 0; d > 0; j++, d >>= 1) {
+            if (d & 1) {
+                u = up[j][u];
+            }
         }
-        return up[0][u];
-    }
-
-    // BIT with XOR: range update on subtrees, point query for prefix
-    const bit = new Int32Array(n + 2);
-    function bitUpd(i: number, val: number): void {
-        for (i++; i <= n; i += i & -i) bit[i] ^= val;
-    }
-    function bitQry(i: number): number {
-        let r = 0;
-        for (i++; i > 0; i -= i & -i) r ^= bit[i];
-        return r;
+        if (u === v) {
+            return u;
+        }
+        for (let j = m - 1; j >= 0; j--) {
+            if (up[j][u] !== up[j][v]) {
+                u = up[j][u];
+                v = up[j][v];
+            }
+        }
+        return parent[u];
     }
 
     const ans: boolean[] = [];
     for (const q of queries) {
         const parts = q.split(' ');
+        const u = Number(parts[1]);
         if (parts[0] === 'update') {
-            const u = parseInt(parts[1]);
-            const c = parts[2];
-            const delta = (1 << (sc[u].charCodeAt(0) - 97)) ^ (1 << (c.charCodeAt(0) - 97));
-            if (delta !== 0) {
-                bitUpd(tin[u], delta);
-                if (tout[u] + 1 < n) bitUpd(tout[u] + 1, delta);
+            const y = 1 << (parts[2].charCodeAt(0) - 97);
+            if (bit[u] !== y) {
+                const delta = bit[u] ^ y;
+                tree.update(tin[u], delta);
+                tree.update(tout[u], delta);
+                bit[u] = y;
             }
-            sc[u] = c;
         } else {
-            const u = parseInt(parts[1]);
-            const v = parseInt(parts[2]);
-            const l = lca(u, v);
-            // Current effective prefix = original prefix ^ accumulated BIT delta
-            const mask = (pfx[u] ^ bitQry(tin[u]))
-                       ^ (pfx[v] ^ bitQry(tin[v]))
-                       ^ (1 << (sc[l].charCodeAt(0) - 97));
-            // At most 1 bit set ⟹ can form palindrome
+            const v = Number(parts[2]);
+            const w = lca(u, v);
+            const mask = tree.query(tin[u] + 1) ^ tree.query(tin[v] + 1) ^ bit[w];
             ans.push((mask & (mask - 1)) === 0);
         }
     }
